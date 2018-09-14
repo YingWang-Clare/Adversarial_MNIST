@@ -1,6 +1,4 @@
 import tensorflow as tf
-from tensorflow.examples.tutorials.mnist import input_data
-from tensorflow.python.framework import ops
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import ImageGrid
 import numpy as np
@@ -8,9 +6,38 @@ import os
 import pickle
 import math
 
-mnist = input_data.read_data_sets('MNIST_data', one_hot=True)
+# mnist = input_data.read_data_sets('MNIST_data', one_hot=True)
+mnist = tf.keras.datasets.mnist
+(x_train, y_train),(x_test, y_test) = mnist.load_data()
+
 sess = tf.InteractiveSession()
 
+
+def save_model(model, filename):
+    '''
+    This function takes as input a trained model, and a filename.
+    The model is stored in the new file specified by filename, if
+    such a file already exists, nothing is returned.
+    '''
+    if os.path.exists(filename):
+        print("The file '" + filename + "' already exists in the cwd")
+        return
+    with open(filename, 'w') as fp:
+        pickle.dump(model, fp)
+
+
+def load_model(filename):
+    '''
+    This function takes as input a filename of a file which
+    contains a trained model, and returns the model.
+    If no such file exists, nothing is returned.
+    '''
+    if not os.path.exists(filename):
+        print("The file '" + filename + "' does not exist in the cwd")
+        return
+    with open(filename, 'r') as fp:
+        model = pickle.load(fp)
+    return model
 
 def create_placeholders(n_H0, n_W0, n_y):
     """
@@ -24,7 +51,6 @@ def create_placeholders(n_H0, n_W0, n_y):
     Y = tf.placeholder(dtype=tf.float32, shape=[None, n_y])  # 10 labels
     return X, Y
 
-
 def initialize_parameters():
     """
     Initializes weight parameters to build a neural network with tensorflow.
@@ -37,25 +63,20 @@ def initialize_parameters():
                   "W2": W2}
     return parameters
 
-
 def weight_variable(shape):
     initial = tf.truncated_normal(shape, stddev=0.1)
     return tf.Variable(initial)
-
 
 def bias_variable(shape):
     initial = tf.constant(0.1, shape=shape)
     return tf.Variable(initial)
 
-
 def conv2d(x, W):
     return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='SAME')
-
 
 def max_pool_2x2(x):
     return tf.nn.max_pool(x, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1],
                           padding='SAME')
-
 
 def forward_propagation(x, parameters):
     """
@@ -107,40 +128,8 @@ def forward_propagation(x, parameters):
 def compute_cost(y_conv, y_):
     # TRAIN AND EVALUATE THE MODEL
     cross_entropy = tf.reduce_mean(
-        tf.nn.softmax_cross_entropy_with_logits(labels=y_, logits=y_conv))
+        tf.nn.softmax_cross_entropy_with_logits_v2(labels=y_, logits=y_conv))
     return cross_entropy
-
-
-x, y_ = create_placeholders(28, 28, 10)
-
-parameters = initialize_parameters()
-
-y_conv, y, keep_prob = forward_propagation(x, parameters)
-
-cost = compute_cost(y_conv, y_)
-
-optimizer = tf.train.AdamOptimizer(1e-4).minimize(cost)
-
-saver = tf.train.Saver()
-
-correct_prediction = tf.equal(tf.argmax(y_conv, 1), tf.argmax(y_, 1))
-accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
-
-# Initialize all the variables globally
-init = tf.global_variables_initializer()
-
-# Run the initialization
-sess.run(init)
-for i in range(200):
-    batch = mnist.train.next_batch(50)
-    if i % 200 == 0:
-        train_accuracy = accuracy.eval(feed_dict={x: batch[0], y_: batch[1], keep_prob: 1.0})
-        print('step %d, training accuracy %g' % (i, train_accuracy))
-    optimizer.run(feed_dict={x: batch[0], y_: batch[1], keep_prob: 0.5})
-
-    # test_accuracy = accuracy.eval(feed_dict={x: mnist.test.images, y_: mnist.test.labels, keep_prob: 1.0})
-    # print('test accuracy %g' % (test_accuracy))
-np.savez("model1.npy", parameters)
 
 def plot_predictions(image_list, output_probs=False, adversarial=False):
     '''
@@ -183,9 +172,47 @@ def plot_predictions(image_list, output_probs=False, adversarial=False):
 
     return prob if output_probs else None
 
+
+x, y_ = create_placeholders(28, 28, 10)
+
+parameters = initialize_parameters()
+
+y_conv, y, keep_prob = forward_propagation(x, parameters)
+
+cost = compute_cost(y_conv, y_)
+
+optimizer = tf.train.AdamOptimizer(1e-4).minimize(cost)
+
+saver = tf.train.Saver()
+
+correct_prediction = tf.equal(tf.argmax(y_conv, 1), tf.argmax(y_, 1))
+accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+
+# Initialize all the variables globally
+init = tf.global_variables_initializer()
+
+# Run the initialization
+sess.run(init)
+# Check if we already have a trained model, train only if
+# there isn't a model in the cwd
+if not load_model('convolutional_model.pkl'):
+    for i in range(200):
+        batch = mnist.train.next_batch(50)
+        if i % 200 == 0:
+            train_accuracy = accuracy.eval(feed_dict={x: batch[0], y_: batch[1], keep_prob: 1.0})
+            print('step %d, training accuracy %g' % (i, train_accuracy))
+        optimizer.run(feed_dict={x: batch[0], y_: batch[1], keep_prob: 0.5})
+
+    # test_accuracy = accuracy.eval(feed_dict={x: mnist.test.images, y_: mnist.test.labels, keep_prob: 1.0})
+    # print('test accuracy %g' % (test_accuracy))
+    print(parameters)
+    print('type of parameters: ', type(parameters))
+    save_model(parameters, 'convolutional_model.pkl')
+
+
+
 # Get 9 2s [:,2] from top 500 [0:500], nonzero returns tuple, get index[0], then first 9 [0:9]
 index_of_2s = np.nonzero(mnist.test.labels[0:500][:,2])[0][0:9]
 x_batch = mnist.test.images[index_of_2s]
-parameters1 = np.load("model1.npy")
-print(parameters == parameters1)
+model = load_model('convolutional_model.pkl')
 # plot_predictions(x_batch)
