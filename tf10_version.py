@@ -6,6 +6,9 @@ from __future__ import print_function
 
 import numpy as np
 import tensorflow as tf
+import math
+from mpl_toolkits.axes_grid1 import ImageGrid
+import matplotlib.pyplot as plt
 
 tf.logging.set_verbosity(tf.logging.INFO)
 
@@ -101,6 +104,48 @@ def cnn_model_fn(features, labels, mode):
     return tf.estimator.EstimatorSpec(
         mode=mode, loss=loss, eval_metric_ops=eval_metric_ops)
 
+def plot_predictions(mnist_classifier, image_list, output_probs=False, adversarial=False):
+    pred_input_fn = tf.estimator.inputs.numpy_input_fn(
+        x={"x": image_list},
+        num_epochs=1,
+        shuffle=False)
+    pred_results = list(
+        mnist_classifier.predict(input_fn=pred_input_fn, checkpoint_path='./tmp/mnist_convnet_model/model.ckpt-200'))
+
+    pred_list = np.zeros(len(image_list)).astype(int)
+    pct_list = np.zeros(len(image_list)).astype(int)
+
+    # Setup image grid
+    cols = 3
+    rows = int(math.ceil(image_list.shape[0] / cols))
+    fig = plt.figure(1, (12., 12.))
+    grid = ImageGrid(fig, 111,  # similar to subplot(111)
+                     nrows_ncols=(rows, cols),  # creates grid of axes
+                     axes_pad=0.5,  # pad between axes in inch.
+                     )
+
+    # Get probs, images and populate grid
+    for i in range(len(pred_results)):
+        pred_list[i] = np.argmax(pred_results[i].get('probabilities'))  # for mnist index == classification
+        pct_list[i] = pred_results[i].get('probabilities')[pred_list[i]] * 100
+
+        image = image_list[i].reshape(28, 28)
+        grid[i].imshow(image)
+
+        grid[i].set_title('Label: {0} \nCertainty: {1}%' \
+                          .format(pred_list[i],
+                                  pct_list[i]))
+
+        # Only use when plotting original, partial deriv and adversarial images
+        # if (adversarial) & (i % 3 == 1):
+        #     grid[i].set_title("Adversarial \nPartial Derivatives")
+
+    plt.show()
+
+
+def find_all_2s(labels):
+    index_of_2s = [i for i in range(len(labels)) if labels[i] == 2]
+    return index_of_2s
 
 def main(unused_argv):
     # Load training and eval data
@@ -121,26 +166,36 @@ def main(unused_argv):
         tensors=tensors_to_log, every_n_iter=50)
 
     # Train the model
-    train_input_fn = tf.estimator.inputs.numpy_input_fn(
-        x={"x": train_data},
-        y=train_labels,
-        batch_size=50,
-        num_epochs=None,
-        shuffle=True)
-    mnist_classifier.train(
-        input_fn=train_input_fn,
-        steps=200,
-        hooks=[logging_hook])
+    # train_input_fn = tf.estimator.inputs.numpy_input_fn(
+    #     x={"x": train_data},
+    #     y=train_labels,
+    #     batch_size=50,
+    #     num_epochs=None,
+    #     shuffle=True)
+    # mnist_classifier.train(
+    #     input_fn=train_input_fn,
+    #     steps=200,
+    #     hooks=[logging_hook])
 
     # Evaluate the model and print results
-    eval_input_fn = tf.estimator.inputs.numpy_input_fn(
-        x={"x": eval_data},
-        y=eval_labels,
-        num_epochs=1,
-        shuffle=False)
-    eval_results = mnist_classifier.evaluate(input_fn=eval_input_fn)
-    print(eval_results)
+    # eval_input_fn = tf.estimator.inputs.numpy_input_fn(
+    #     x={"x": eval_data},
+    #     y=eval_labels,
+    #     num_epochs=1,
+    #     shuffle=False)
+    # eval_results = mnist_classifier.evaluate(input_fn=eval_input_fn)
+    # print(eval_results)
 
+    index_of_2s = find_all_2s(eval_labels) # 1032
+    x_batch = eval_data[index_of_2s[10:19]]
+    # for i in eval_labels[index_of_2s]:
+    #     if i == 2:
+    #         continue
+    #     else:
+    #         print(i)
+    # print('complete checking')
+    plot_predictions(mnist_classifier, x_batch)
+    
 
 if __name__ == "__main__":
     tf.app.run()
