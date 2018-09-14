@@ -9,6 +9,7 @@ import tensorflow as tf
 import math
 from mpl_toolkits.axes_grid1 import ImageGrid
 import matplotlib.pyplot as plt
+import itertools
 
 tf.logging.set_verbosity(tf.logging.INFO)
 
@@ -126,22 +127,22 @@ def main(unused_argv):
     # train_input_fn = tf.estimator.inputs.numpy_input_fn(
     #     x={"x": train_data},
     #     y=train_labels,
-    #     batch_size=100,
+    #     batch_size=50,
     #     num_epochs=None,
     #     shuffle=True)
     # mnist_classifier.train(
     #     input_fn=train_input_fn,
-    #     steps=20000,
+    #     steps=200,
     #     hooks=[logging_hook])
 
     # Evaluate the model and print results
-    eval_input_fn = tf.estimator.inputs.numpy_input_fn(
-        x={"x": eval_data},
-        y=eval_labels,
-        num_epochs=1,
-        shuffle=False)
-    eval_results = mnist_classifier.evaluate(input_fn=eval_input_fn)
-    print(eval_results)
+    # eval_input_fn = tf.estimator.inputs.numpy_input_fn(
+    #     x={"x": eval_data},
+    #     y=eval_labels,
+    #     num_epochs=1,
+    #     shuffle=False)
+    # eval_results = mnist_classifier.evaluate(input_fn=eval_input_fn)
+    # print(eval_results)
 
     index_of_2s = find_all_2s(eval_labels) # 1032
     x_batch = eval_data[index_of_2s[10:19]]
@@ -151,17 +152,19 @@ def main(unused_argv):
     #     else:
     #         print(i)
     # print('complete checking')
-    plot_predictions(mnist_classifier, x_batch)
+
+    # plot_predictions(mnist_classifier, x_batch)
 
     # Pick a random 2 image from first 1000 images
     # Create adversarial image and with target label 6
-    rand_index = np.random.randint(0, len(index_of_2s))
-    image_norm = eval_data[index_of_2s[rand_index]]
-    image_norm = np.reshape(image_norm, (1, 784))
-    label_adv = [0, 0, 0, 0, 0, 0, 1, 0, 0, 0]  # one hot encoded, adversarial label 6
+    # rand_index = np.random.randint(0, len(index_of_2s))
+    # image_norm = eval_data[index_of_2s[rand_index]]
+    # label_adv = 6  # one hot encoded, adversarial label 6
+    labels_adv = [6 for i in range(len(x_batch))]
     # Plot adversarial images
     # Over each step, model certainty changes from 2 to 6
-    # create_plot_adversarial_images(image_norm, label_adv, lr=0.2, n_steps=5)
+
+    create_plot_adversarial_images(mnist_classifier, x_batch[3], labels_adv[3], lr=0.2, n_steps=5)
 
 def plot_predictions(mnist_classifier, image_list, output_probs=False, adversarial=False):
     pred_input_fn = tf.estimator.inputs.numpy_input_fn(
@@ -196,43 +199,104 @@ def plot_predictions(mnist_classifier, image_list, output_probs=False, adversari
                                   pct_list[i]))
 
         # Only use when plotting original, partial deriv and adversarial images
-        # if (adversarial) & (i % 3 == 1):
-        #     grid[i].set_title("Adversarial \nPartial Derivatives")
+        if (adversarial) & (i % 3 == 1):
+            grid[i].set_title("Adversarial \nPartial Derivatives")
 
     plt.show()
-
 
 def find_all_2s(labels):
     index_of_2s = [i for i in range(len(labels)) if labels[i] == 2]
     return index_of_2s
 
-# def create_plot_adversarial_images(x_image, y_label, lr=0.1, n_steps=1, output_probs=False):
-#     original_image = x_image
-#     probs_per_step = []
-#
-#     # Calculate loss, derivative and create adversarial image
-#     # https://www.tensorflow.org/versions/r0.11/api_docs/python/train/gradient_computation
-#     loss = tf.nn.softmax_cross_entropy_with_logits(labels=y_label, logits=y_conv)
-#     deriv = tf.gradients(loss, x)
-#     image_adv = tf.stop_gradient(x - tf.sign(deriv) * lr / n_steps)
-#     image_adv = tf.clip_by_value(image_adv, 0, 1)  # prevents -ve values creating 'real' image
-#
-#     for _ in range(n_steps):
-#         # Calculate derivative and adversarial image
-#         dydx = sess.run(deriv, {x: x_image, keep_prob: 1.0})  # can't seem to access 'deriv' w/o running this
-#         x_adv = sess.run(image_adv, {x: x_image, keep_prob: 1.0})
-#
-#         # Create darray of 3 images - orig, noise/delta, adversarial
-#         x_image = np.reshape(x_adv, (1, 784))
-#         img_adv_list = original_image
-#         img_adv_list = np.append(img_adv_list, dydx[0], axis=0)
-#         img_adv_list = np.append(img_adv_list, x_image, axis=0)
-#
-#         # Print/plot images and return probabilities
-#         probs = plot_predictions(img_adv_list, output_probs=output_probs, adversarial=True)
-#         probs_per_step.append(probs) if output_probs else None
-#
-#     return probs_per_step
+def create_plot_adversarial_images(mnist_classifier, true_images, fake_labels, lr=0.1, n_steps=1, output_probs=False):
+    true_images = np.reshape(true_images, (1, 784))
+    fake_labels = np.atleast_1d(fake_labels)
+    orig_imgs = true_images
+    probs_per_step = []
+    # multiple images:    shape of x:  (9, 784);   shape of y:  (9,)
+    # single image:       shape of x:  (1, 784);       shape of y:  (1,)
+    # print('shape of x: ', np.reshape(true_images, (1, 784)).shape)
+    # print('shape of orig: ', orig_imgs.shape)
+    # print('shape of y: ', np.atleast_1d(fake_labels).shape)
+
+    # Evaluate the model with 2 and fake label 6.
+
+    eval_input_fn = tf.estimator.inputs.numpy_input_fn(
+        x={"x": true_images},
+        y=fake_labels,
+        num_epochs=1,
+        shuffle=False)
+    eval_results = mnist_classifier.evaluate(
+        input_fn=eval_input_fn, checkpoint_path='./tmp/mnist_convnet_model/model.ckpt-20200')
+
+    with tf.Session() as sess:
+        loss = tf.convert_to_tensor(eval_results['loss'], dtype=tf.float32)
+
+        sess.run(tf.global_variables_initializer())
+
+        sess.run(loss)
+        print('loss: ', loss.eval())
+
+        def _compute_gradients(tensor, var_list):
+            grads = tf.gradients(tensor, var_list)
+            return [grad if grad is not None else tf.zeros_like(var)
+                    for var, grad in zip(var_list, grads)]
+
+        deriv = _compute_gradients(loss, true_images) # is a list of tensors
+        print('deriv: ')
+        print(type(deriv))
+        print(len(deriv))
+        print(deriv[0])
+        image_adv = tf.stop_gradient(true_images - tf.sign(deriv) * lr / n_steps)
+        image_adv = tf.clip_by_value(image_adv, 0, 1)  # prevents -ve values creating 'real' image
+
+
+        for _ in range(n_steps):
+
+            dydx = sess.run(deriv)
+            x_adv = sess.run(image_adv)
+
+            # Create darray of 3 images - orig, noise/delta, adversarial
+            x_image = np.reshape(x_adv, (1, 784))
+            img_adv_list = orig_imgs #  (1, 784)
+            print('img_list: ', img_adv_list.shape)
+            img_adv_list = np.append(img_adv_list, sess.run(tf.reshape(dydx[0], (1, 784))), axis=0)
+            img_adv_list = np.append(img_adv_list, x_image, axis=0)
+
+            # Print/plot images and return probabilities
+            probs = plot_predictions(mnist_classifier, img_adv_list, output_probs=output_probs, adversarial=True)
+            probs_per_step.append(probs) if output_probs else None
+
+    return probs_per_step
+
+
+def create_plot_adversarial_images_og(x_image, y_label, lr=0.1, n_steps=1, output_probs=False):
+    original_image = x_image
+    probs_per_step = []
+
+    # Calculate loss, derivative and create adversarial image
+    # https://www.tensorflow.org/versions/r0.11/api_docs/python/train/gradient_computation
+    loss = tf.nn.softmax_cross_entropy_with_logits(labels=y_label, logits=y_conv)
+    deriv = tf.gradients(loss, x)
+    image_adv = tf.stop_gradient(x - tf.sign(deriv) * lr / n_steps)
+    image_adv = tf.clip_by_value(image_adv, 0, 1)  # prevents -ve values creating 'real' image
+
+    for _ in range(n_steps):
+        # Calculate derivative and adversarial image
+        dydx = sess.run(deriv, {x: x_image, keep_prob: 1.0})  # can't seem to access 'deriv' w/o running this
+        x_adv = sess.run(image_adv, {x: x_image, keep_prob: 1.0})
+
+        # Create darray of 3 images - orig, noise/delta, adversarial
+        x_image = np.reshape(x_adv, (1, 784))
+        img_adv_list = original_image # (1, 784)
+        img_adv_list = np.append(img_adv_list, dydx[0], axis=0)
+        img_adv_list = np.append(img_adv_list, x_image, axis=0)
+
+        # Print/plot images and return probabilities
+        probs = plot_predictions(img_adv_list, output_probs=output_probs, adversarial=True)
+        probs_per_step.append(probs) if output_probs else None
+
+    return probs_per_step
 
 if __name__ == "__main__":
     tf.app.run()
