@@ -9,7 +9,6 @@ import tensorflow as tf
 import math
 from mpl_toolkits.axes_grid1 import ImageGrid
 import matplotlib.pyplot as plt
-import itertools
 
 tf.logging.set_verbosity(tf.logging.INFO)
 

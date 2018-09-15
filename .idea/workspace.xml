@@ -2,6 +2,8 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="ea2e6672-9924-4ef4-a9c1-7992e68d27e8" name="Default" comment="">
+      <change type="DELETED" beforePath="$PROJECT_DIR$/.ipynb_checkpoints/Adversial_MNIST-checkpoint.ipynb" afterPath="" />
+      <change type="DELETED" beforePath="$PROJECT_DIR$/Adversial_MNIST.ipynb" afterPath="" />
       <change type="MODIFICATION" beforePath="$PROJECT_DIR$/.idea/workspace.xml" afterPath="$PROJECT_DIR$/.idea/workspace.xml" />
       <change type="MODIFICATION" beforePath="$PROJECT_DIR$/tf10_version.py" afterPath="$PROJECT_DIR$/tf10_version.py" />
     </list>
@@ -20,15 +22,6 @@
   </component>
   <component name="FileEditorManager">
     <leaf>
-      <file leaf-file-name="Adversial_MNIST.ipynb" pinned="false" current-in-tab="false">
-        <entry file="file://$PROJECT_DIR$/Adversial_MNIST.ipynb">
-          <provider selected="true" editor-type-id="ipnb-editor">
-            <state>
-              <selected id="14" />
-            </state>
-          </provider>
-        </entry>
-      </file>
       <file leaf-file-name="main.py" pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/main.py">
           <provider selected="true" editor-type-id="text-editor">
@@ -42,12 +35,10 @@
       <file leaf-file-name="tf10_version.py" pinned="false" current-in-tab="true">
         <entry file="file://$PROJECT_DIR$/tf10_version.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="4000">
-              <caret line="239" column="26" lean-forward="false" selection-start-line="239" selection-start-column="26" selection-end-line="239" selection-end-column="26" />
+            <state relative-caret-position="2864">
+              <caret line="278" column="26" lean-forward="true" selection-start-line="278" selection-start-column="26" selection-end-line="278" selection-end-column="26" />
               <folding>
                 <element signature="e#79#117#0" expanded="true" />
-                <element signature="e#6293#6379#0" expanded="false" />
-                <element signature="e#6707#8149#0" expanded="false" />
               </folding>
             </state>
           </provider>
@@ -385,12 +376,10 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/tf10_version.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="4000">
-          <caret line="239" column="26" lean-forward="false" selection-start-line="239" selection-start-column="26" selection-end-line="239" selection-end-column="26" />
+        <state relative-caret-position="2864">
+          <caret line="278" column="26" lean-forward="true" selection-start-line="278" selection-start-column="26" selection-end-line="278" selection-end-column="26" />
           <folding>
             <element signature="e#79#117#0" expanded="true" />
-            <element signature="e#6293#6379#0" expanded="false" />
-            <element signature="e#6707#8149#0" expanded="false" />
           </folding>
         </state>
       </provider>
