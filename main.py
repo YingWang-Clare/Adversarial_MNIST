@@ -1,149 +1,194 @@
-import tensorflow as tf
-import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1 import ImageGrid
+"""Convolutional Neural Network Estimator for MNIST, built with tf.layers."""
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 import numpy as np
-import os
-import pickle
+import tensorflow as tf
 import math
+from mpl_toolkits.axes_grid1 import ImageGrid
+import matplotlib.pyplot as plt
 
-# mnist = input_data.read_data_sets('MNIST_data', one_hot=True)
-mnist = tf.keras.datasets.mnist
-(x_train, y_train),(x_test, y_test) = mnist.load_data()
-
-sess = tf.InteractiveSession()
+tf.logging.set_verbosity(tf.logging.INFO)
 
 
-def save_model(model, filename):
-    '''
-    This function takes as input a trained model, and a filename.
-    The model is stored in the new file specified by filename, if
-    such a file already exists, nothing is returned.
-    '''
-    if os.path.exists(filename):
-        print("The file '" + filename + "' already exists in the cwd")
-        return
-    with open(filename, 'w') as fp:
-        pickle.dump(model, fp)
+def cnn_model_fn(features, labels, mode):
+    """Model function for CNN."""
+    # Input Layer
+    # Reshape X to 4-D tensor: [batch_size, width, height, channels]
+    # MNIST images are 28x28 pixels, and have one color channel
+    input_layer = tf.reshape(features["x"], [-1, 28, 28, 1])
 
+    # Convolutional Layer #1
+    # Computes 32 features using a 5x5 filter with ReLU activation.
+    # Padding is added to preserve width and height.
+    # Input Tensor Shape: [batch_size, 28, 28, 1]
+    # Output Tensor Shape: [batch_size, 28, 28, 32]
+    conv1 = tf.layers.conv2d(
+        inputs=input_layer,
+        filters=32,
+        kernel_size=[5, 5],
+        padding="same",
+        activation=tf.nn.relu)
 
-def load_model(filename):
-    '''
-    This function takes as input a filename of a file which
-    contains a trained model, and returns the model.
-    If no such file exists, nothing is returned.
-    '''
-    if not os.path.exists(filename):
-        print("The file '" + filename + "' does not exist in the cwd")
-        return
-    with open(filename, 'r') as fp:
-        model = pickle.load(fp)
-    return model
+    # Pooling Layer #1
+    # First max pooling layer with a 2x2 filter and stride of 2
+    # Input Tensor Shape: [batch_size, 28, 28, 32]
+    # Output Tensor Shape: [batch_size, 14, 14, 32]
+    pool1 = tf.layers.max_pooling2d(inputs=conv1, pool_size=[2, 2], strides=2)
 
-def create_placeholders(n_H0, n_W0, n_y):
-    """
-    Creates the placeholders for the tensorflow session.
-    Arguments:
-    n_H0 -- scalar, height of an input image
-    n_W0 -- scalar, width of an input image
-    n_y -- scalar, number of classes
-    """
-    X = tf.placeholder(dtype=tf.float32, shape=[None, n_H0 * n_W0])  # 28 x 28 pixels
-    Y = tf.placeholder(dtype=tf.float32, shape=[None, n_y])  # 10 labels
-    return X, Y
+    # Convolutional Layer #2
+    # Computes 64 features using a 5x5 filter.
+    # Padding is added to preserve width and height.
+    # Input Tensor Shape: [batch_size, 14, 14, 32]
+    # Output Tensor Shape: [batch_size, 14, 14, 64]
+    conv2 = tf.layers.conv2d(
+        inputs=pool1,
+        filters=64,
+        kernel_size=[5, 5],
+        padding="same",
+        activation=tf.nn.relu)
 
-def initialize_parameters():
-    """
-    Initializes weight parameters to build a neural network with tensorflow.
-    Returns:
-    parameters -- a dictionary of tensors containing W1, W2
-    """
-    W1 = tf.get_variable("W1", [5, 5, 1, 32], initializer=tf.contrib.layers.xavier_initializer())
-    W2 = tf.get_variable("W2", [5, 5, 32, 64], initializer=tf.contrib.layers.xavier_initializer())
-    parameters = {"W1": W1,
-                  "W2": W2}
-    return parameters
+    # Pooling Layer #2
+    # Second max pooling layer with a 2x2 filter and stride of 2
+    # Input Tensor Shape: [batch_size, 14, 14, 64]
+    # Output Tensor Shape: [batch_size, 7, 7, 64]
+    pool2 = tf.layers.max_pooling2d(inputs=conv2, pool_size=[2, 2], strides=2)
 
-def weight_variable(shape):
-    initial = tf.truncated_normal(shape, stddev=0.1)
-    return tf.Variable(initial)
+    # Flatten tensor into a batch of vectors
+    # Input Tensor Shape: [batch_size, 7, 7, 64]
+    # Output Tensor Shape: [batch_size, 7 * 7 * 64]
+    pool2_flat = tf.reshape(pool2, [-1, 7 * 7 * 64])
 
-def bias_variable(shape):
-    initial = tf.constant(0.1, shape=shape)
-    return tf.Variable(initial)
+    # Dense Layer
+    # Densely connected layer with 1024 neurons
+    # Input Tensor Shape: [batch_size, 7 * 7 * 64]
+    # Output Tensor Shape: [batch_size, 1024]
+    dense = tf.layers.dense(inputs=pool2_flat, units=1024, activation=tf.nn.relu)
+
+    # Add dropout operation; 0.6 probability that element will be kept
+    dropout = tf.layers.dropout(
+        inputs=dense, rate=0.4, training=mode == tf.estimator.ModeKeys.TRAIN)
+
+    # Logits layer
+    # Input Tensor Shape: [batch_size, 1024]
+    # Output Tensor Shape: [batch_size, 10]
+    logits = tf.layers.dense(inputs=dropout, units=10)
+
+    predictions = {
+        # Generate predictions (for PREDICT and EVAL mode)
+        "classes": tf.argmax(input=logits, axis=1),
+        # Add `softmax_tensor` to the graph. It is used for PREDICT and by the
+        # `logging_hook`.
+        "probabilities": tf.nn.softmax(logits, name="softmax_tensor")
+    }
+    if mode == tf.estimator.ModeKeys.PREDICT:
+        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
+
+    # Calculate Loss (for both TRAIN and EVAL modes)
+    loss = tf.losses.sparse_softmax_cross_entropy(labels=labels, logits=logits)
+
+    # Configure the Training Op (for TRAIN mode)
+    if mode == tf.estimator.ModeKeys.TRAIN:
+        optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.001)
+        train_op = optimizer.minimize(
+            loss=loss,
+            global_step=tf.train.get_global_step())
+        return tf.estimator.EstimatorSpec(mode=mode, loss=loss, train_op=train_op)
+
+    # Add evaluation metrics (for EVAL mode)
+    eval_metric_ops = {
+        "accuracy": tf.metrics.accuracy(
+            labels=labels, predictions=predictions["classes"])}
+    return tf.estimator.EstimatorSpec(
+        mode=mode, loss=loss, eval_metric_ops=eval_metric_ops)
+
+def main(unused_argv):
+    # Load training and eval data
+    mnist = tf.contrib.learn.datasets.load_dataset("mnist")
+    train_data = mnist.train.images  # Returns np.array
+    train_labels = np.asarray(mnist.train.labels, dtype=np.int32)
+    eval_data = mnist.test.images  # Returns np.array
+    eval_labels = np.asarray(mnist.test.labels, dtype=np.int32)
+
+    # Create the Estimator
+    mnist_classifier = tf.estimator.Estimator(
+        model_fn=cnn_model_fn, model_dir="./tmp/mnist_convnet_model")
+
+    # Set up logging for predictions
+    # Log the values in the "Softmax" tensor with label "probabilities"
+    tensors_to_log = {"probabilities": "softmax_tensor"}
+    logging_hook = tf.train.LoggingTensorHook(
+        tensors=tensors_to_log, every_n_iter=50)
+
+    # Train the model
+    # train_input_fn = tf.estimator.inputs.numpy_input_fn(
+    #     x={"x": train_data},
+    #     y=train_labels,
+    #     batch_size=50,
+    #     num_epochs=None,
+    #     shuffle=True)
+    # mnist_classifier.train(
+    #     input_fn=train_input_fn,
+    #     steps=200,
+    #     hooks=[logging_hook])
+
+    # Evaluate the model and print results
+    # eval_input_fn = tf.estimator.inputs.numpy_input_fn(
+    #     x={"x": eval_data},
+    #     y=eval_labels,
+    #     num_epochs=1,
+    #     shuffle=False)
+    # eval_results = mnist_classifier.evaluate(input_fn=eval_input_fn)
+    # print(eval_results)
+
+    index_of_2s = find_all_2s(train_labels) # 1032
+    x_batch = train_data[index_of_2s[10:19]]
+    # for i in eval_labels[index_of_2s]:
+    #     if i == 2:
+    #         continue
+    #     else:
+    #         print(i)
+    # print('complete checking')
+
+    # plot_predictions(mnist_classifier, x_batch)
+
+    # Pick a random 2 image from first 1000 images
+    # Create adversarial image and with target label 6
+    rand_index = np.random.randint(0, len(index_of_2s))
+    image = train_data[index_of_2s[rand_index]]
+    label_adv = 6  # one hot encoded, adversarial label 6
+    # Plot adversarial images
+    # Over each step, model certainty changes from 2 to 6
+
+    # create_plot_adversarial_images(mnist_classifier, x_batch[3], labels_adv[3], lr=0.2, n_steps=5)
+    adversial_image(mnist_classifier, image, label_adv, lr=0.25, n_steps=35)
+
+def find_all_2s(labels):
+    index_of_2s = [i for i in range(len(labels)) if labels[i] == 2]
+    return index_of_2s
 
 def conv2d(x, W):
-    return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='SAME')
+    return tf.nn.conv2d(x, W, strides = [1, 1, 1, 1], padding= 'SAME')
 
 def max_pool_2x2(x):
-    return tf.nn.max_pool(x, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1],
-                          padding='SAME')
+    return tf.nn.max_pool(x, ksize = [1, 2, 2, 1], strides = [1, 2, 2, 1],
+                          padding = 'SAME')
 
-def forward_propagation(x, parameters):
-    """
-    Implements the forward propagation for the model:
-        CONV2D -> RELU -> MAXPOOL -> CONV2D -> RELU -> MAXPOOL -> FLATTEN -> FULLYCONNECTED
-    """
-    # Retrieve the parameters from the dictionary "parameters"
-    W1 = parameters['W1']
-    W2 = parameters['W2']
+def plot_predictions(mnist_classifier, image_list, output_probs=False, adversarial=False):
+    pred_input_fn = tf.estimator.inputs.numpy_input_fn(
+        x={"x": image_list},
+        num_epochs=1,
+        shuffle=False)
+    pred_results = list(
+        mnist_classifier.predict(input_fn=pred_input_fn, checkpoint_path='./tmp/mnist_convnet_model/model.ckpt-20200'))
 
-    # THIS IS THE FIRST CONV LAYER:
-    # The shape has four paras, the first two are the patch size,
-    # the third one is the number of input channels, the last one
-    # is the number of output channels.
-    W_conv1 = weight_variable(W1.shape)  # [5, 5, 1, 32]
-    # bias has a vector, each output channel has one bias
-    b_conv1 = bias_variable([W1.shape[3]])  # 32
-    # Reshape the input image, the 2 and 3 paras are width and height,
-    # the last para is the number of input image channel
-    x_image = tf.reshape(x, [-1, 28, 28, 1])
-    # do the convolve and plus bias and apply relu func
-    h_conv1 = tf.nn.relu(conv2d(x_image, W_conv1) + b_conv1)
-    # do the max pooling operation
-    h_pool1 = max_pool_2x2(h_conv1)
-    # THIS IS THE SECOND CONV LAYER:
-    W_conv2 = weight_variable(W2.shape)  # [5, 5, 32, 64]
-    b_conv2 = bias_variable([W2.shape[3]])  # 64
-    h_conv2 = tf.nn.relu(conv2d(h_pool1, W_conv2) + b_conv2)
-    h_pool2 = max_pool_2x2(h_conv2)
-    # THIS IS DENSELY CONNECTED LAYER:
-    W_fc1 = weight_variable([7 * 7 * 64, 1024])
-    b_fc1 = bias_variable([1024])
-    h_pool2_flat = tf.reshape(h_pool2, [-1, 7 * 7 * 64])
-    h_fc1 = tf.nn.relu(tf.matmul(h_pool2_flat, W_fc1) + b_fc1)
-    # THIS IS DROPOUT:
-    # We keep a placeholder for threshold of dropout, turn it on when
-    # training, and turn if off when testing
-    keep_prob = tf.placeholder(tf.float32)
-    h_fc1_drop = tf.nn.dropout(h_fc1, keep_prob)
-    # THIS IS READOUT LAYER:
-    W_fc2 = weight_variable([1024, 10])
-    b_fc2 = bias_variable([10])
-    y_conv = tf.matmul(h_fc1_drop, W_fc2) + b_fc2
-    # Probabilities - output from model (not the same as logits)
-    y = tf.nn.softmax(y_conv)
-    return y_conv, y, keep_prob
-
-
-def compute_cost(y_conv, y_):
-    # TRAIN AND EVALUATE THE MODEL
-    cross_entropy = tf.reduce_mean(
-        tf.nn.softmax_cross_entropy_with_logits_v2(labels=y_, logits=y_conv))
-    return cross_entropy
-
-def plot_predictions(image_list, output_probs=False, adversarial=False):
-    '''
-    Evaluate images against trained model and plot images.
-    If adversarial == True, replace middle image title appropriately
-    Return probability list if output_probs == True
-    '''
-    prob = y.eval(feed_dict={x: image_list, keep_prob: 1.0})
 
     pred_list = np.zeros(len(image_list)).astype(int)
     pct_list = np.zeros(len(image_list)).astype(int)
 
     # Setup image grid
-
     cols = 3
     rows = int(math.ceil(image_list.shape[0] / cols))
     fig = plt.figure(1, (12., 12.))
@@ -153,12 +198,12 @@ def plot_predictions(image_list, output_probs=False, adversarial=False):
                      )
 
     # Get probs, images and populate grid
-    for i in range(len(prob)):
-        pred_list[i] = np.argmax(prob[i])  # for mnist index == classification
-        pct_list[i] = prob[i][pred_list[i]] * 100
+    for i in range(len(pred_results)):
+        pred_list[i] = np.argmax(pred_results[i].get('probabilities'))  # for mnist index == classification
+        pct_list[i] = pred_results[i].get('probabilities')[pred_list[i]] * 100
 
         image = image_list[i].reshape(28, 28)
-        grid[i].imshow(image)
+        grid[i].imshow(image, cmap="gray")
 
         grid[i].set_title('Label: {0} \nCertainty: {1}%' \
                           .format(pred_list[i],
@@ -170,49 +215,66 @@ def plot_predictions(image_list, output_probs=False, adversarial=False):
 
     plt.show()
 
-    return prob if output_probs else None
+def adversial_image(mnist_classifier, true_images, fake_labels, lr, n_steps, output_probs=False):
+    true_images = np.reshape(true_images, (1, 784))
+    orig_images = true_images
+    fake_ = np.zeros((10, 1))
+    fake_[fake_labels] = 1
+
+    x = tf.placeholder(tf.float32, shape=[None, 784])
+    x_image = tf.reshape(x, [-1, 28, 28, 1])
+    conv1_w = mnist_classifier.get_variable_value('conv2d/kernel')
+    conv1_b = mnist_classifier.get_variable_value('conv2d/bias')
+    conv1_o = tf.nn.relu(conv2d(x_image, conv1_w) + conv1_b)
+    pool1_h = max_pool_2x2(conv1_o)
+    conv2_w = mnist_classifier.get_variable_value('conv2d_1/kernel')
+    conv2_b = mnist_classifier.get_variable_value('conv2d_1/bias')
+    conv2_o = tf.nn.relu(conv2d(pool1_h, conv2_w) + conv2_b)
+    pool2_h = max_pool_2x2(conv2_o)
+    dense1_w = mnist_classifier.get_variable_value('dense/kernel')
+    dense1_b = mnist_classifier.get_variable_value('dense/bias')
+    pool2_flat = tf.reshape(pool2_h, [-1, 7 * 7 * 64])
+    dense_o = tf.nn.relu(tf.matmul(pool2_flat, dense1_w) + dense1_b)
+    dense2_w = mnist_classifier.get_variable_value('dense_1/kernel')
+    dense2_b = mnist_classifier.get_variable_value('dense_1/bias')
+    dense2_o = tf.matmul(dense_o, dense2_w) + dense2_b
+    logits = tf.nn.softmax(dense2_o)
+    loss = tf.reduce_mean(
+        tf.nn.softmax_cross_entropy_with_logits_v2(labels=fake_, logits=logits))
+    deriv = tf.gradients(loss, x)[0]
+    image_adv = tf.stop_gradient(x - tf.sign(deriv) * lr / n_steps)
+    image_adv = tf.clip_by_value(image_adv, 0, 1)
 
 
-x, y_ = create_placeholders(28, 28, 10)
+    with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
+        y = sess.run(logits, feed_dict={x: true_images})
+        y = np.reshape(y, (10, 1))
+        # print('y: ', y)
+        # print(type(true_images))
+        for _ in range(n_steps):
+            dydx = sess.run(deriv, feed_dict={x: true_images}) # 1 x 784
+            # print('dydx: ')
+            # print(type(dydx))
+            # print(dydx.shape)
 
-parameters = initialize_parameters()
+            x_adv = sess.run(image_adv, feed_dict={x: true_images}) # 1 x 784
+            # print('x_adv: ')
+            # print(type(x_adv))
+            # print(x_adv.shape)
 
-y_conv, y, keep_prob = forward_propagation(x, parameters)
+            # Create darray of 3 images - orig, noise/delta, adversarial
+            true_images = np.reshape(x_adv, (1, 784))
+            # print(type(true_images))
+            img_adv_list = orig_images  # (1, 784)
+            img_adv_list = np.append(img_adv_list, dydx, axis=0)
+            img_adv_list = np.append(img_adv_list, true_images, axis=0)
 
-cost = compute_cost(y_conv, y_)
-
-optimizer = tf.train.AdamOptimizer(1e-4).minimize(cost)
-
-saver = tf.train.Saver()
-
-correct_prediction = tf.equal(tf.argmax(y_conv, 1), tf.argmax(y_, 1))
-accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
-
-# Initialize all the variables globally
-init = tf.global_variables_initializer()
-
-# Run the initialization
-sess.run(init)
-# Check if we already have a trained model, train only if
-# there isn't a model in the cwd
-if not load_model('convolutional_model.pkl'):
-    for i in range(200):
-        batch = mnist.train.next_batch(50)
-        if i % 200 == 0:
-            train_accuracy = accuracy.eval(feed_dict={x: batch[0], y_: batch[1], keep_prob: 1.0})
-            print('step %d, training accuracy %g' % (i, train_accuracy))
-        optimizer.run(feed_dict={x: batch[0], y_: batch[1], keep_prob: 0.5})
-
-    # test_accuracy = accuracy.eval(feed_dict={x: mnist.test.images, y_: mnist.test.labels, keep_prob: 1.0})
-    # print('test accuracy %g' % (test_accuracy))
-    print(parameters)
-    print('type of parameters: ', type(parameters))
-    save_model(parameters, 'convolutional_model.pkl')
+            # Print/plot images and return probabilities
+            probs = plot_predictions(mnist_classifier, img_adv_list, output_probs=output_probs, adversarial=True)
+            # probs_per_step.append(probs) if output_probs else None
+            # print(probs_per_step)
 
 
-
-# Get 9 2s [:,2] from top 500 [0:500], nonzero returns tuple, get index[0], then first 9 [0:9]
-index_of_2s = np.nonzero(mnist.test.labels[0:500][:,2])[0][0:9]
-x_batch = mnist.test.images[index_of_2s]
-model = load_model('convolutional_model.pkl')
-# plot_predictions(x_batch)
+if __name__ == "__main__":
+    tf.app.run()
