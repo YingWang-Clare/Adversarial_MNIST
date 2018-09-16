@@ -25,7 +25,7 @@ def max_pool_2x2(x):
                           padding='SAME')
 
 
-def plot_predictions(mnist_classifier, image_list, adversarial=False):
+def plot_predictions(mnist_classifier, image_list, cnt, adversarial=False):
     # Using the pre-trained model to predict the images in the image_list.
     pred_input_fn = tf.estimator.inputs.numpy_input_fn(
         x={"x": image_list},
@@ -40,6 +40,7 @@ def plot_predictions(mnist_classifier, image_list, adversarial=False):
     cols = 3
     rows = int(math.ceil(image_list.shape[0] / cols))
     fig = plt.figure(1, (12., 12.))
+    fname = 'adv_image_' + str(cnt) + '.png'
     grid = ImageGrid(fig, 111,  # similar to subplot(111)
                      nrows_ncols=(rows, cols),  # creates grid of axes
                      axes_pad=0.5,  # pad between axes in inch.
@@ -57,7 +58,9 @@ def plot_predictions(mnist_classifier, image_list, adversarial=False):
         # Only use when plotting original, partial deriv and adversarial images
         if (adversarial) & (i % 3 == 1):
             grid[i].set_title("Adversarial \nPartial Derivatives")
+    plt.savefig('result_images/' + fname)
     plt.show()
+
 
 
 def adversarial_image(mnist_classifier, true_images, fake_labels, lr, n_steps):
@@ -117,7 +120,7 @@ def adversarial_image(mnist_classifier, true_images, fake_labels, lr, n_steps):
         # predicted label and reshape to (10, 1)
         y = sess.run(logits, feed_dict={x: true_images})
         y = np.reshape(y, (10, 1))
-        for _ in range(n_steps):
+        for i in range(n_steps):
             # noise
             dydx = sess.run(deriv, feed_dict={x: true_images})  # 1 x 784
             # adversarial image
@@ -128,7 +131,7 @@ def adversarial_image(mnist_classifier, true_images, fake_labels, lr, n_steps):
             img_adv_list = np.append(img_adv_list, dydx, axis=0)
             img_adv_list = np.append(img_adv_list, true_images, axis=0)
             # Plot images
-            plot_predictions(mnist_classifier, img_adv_list, adversarial=True)
+            plot_predictions(mnist_classifier, img_adv_list, i, adversarial=True)
 
 
 def cnn_model_fn(features, labels, mode):
@@ -263,9 +266,10 @@ def main(unused_argv):
                                              checkpoint_path='./tmp/mnist_convnet_model/model.ckpt-20200')
     print('Evaluation result: ', eval_results)
 
+    # randomly choose 9 images, uncomment the line to plot
     index_of_2s = find_all_2s(train_labels)
     x_batch = train_data[index_of_2s[10:19]]
-    plot_predictions(mnist_classifier, x_batch)
+    # plot_predictions(mnist_classifier, x_batch, -1)
 
     # Pick a random 2 image from first 1000 images
     # Create adversarial image and with target label 6
