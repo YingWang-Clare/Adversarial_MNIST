@@ -1,5 +1,3 @@
-"""Convolutional Neural Network Estimator for MNIST, built with tf.layers."""
-
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -11,6 +9,126 @@ from mpl_toolkits.axes_grid1 import ImageGrid
 import matplotlib.pyplot as plt
 
 tf.logging.set_verbosity(tf.logging.INFO)
+
+
+def find_all_2s(labels):
+    index_of_2s = [i for i in range(len(labels)) if labels[i] == 2]
+    return index_of_2s
+
+
+def conv2d(x, W):
+    return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='SAME')
+
+
+def max_pool_2x2(x):
+    return tf.nn.max_pool(x, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1],
+                          padding='SAME')
+
+
+def plot_predictions(mnist_classifier, image_list, adversarial=False):
+    # Using the pre-trained model to predict the images in the image_list.
+    pred_input_fn = tf.estimator.inputs.numpy_input_fn(
+        x={"x": image_list},
+        num_epochs=1,
+        shuffle=False)
+    pred_results = list(
+        mnist_classifier.predict(input_fn=pred_input_fn, checkpoint_path='./tmp/mnist_convnet_model/model.ckpt-20200'))
+    pred_list = np.zeros(len(image_list)).astype(int)
+    pct_list = np.zeros(len(image_list)).astype(int)
+
+    # Setup image grid
+    cols = 3
+    rows = int(math.ceil(image_list.shape[0] / cols))
+    fig = plt.figure(1, (12., 12.))
+    grid = ImageGrid(fig, 111,  # similar to subplot(111)
+                     nrows_ncols=(rows, cols),  # creates grid of axes
+                     axes_pad=0.5,  # pad between axes in inch.
+                     )
+
+    # Get probs, images and populate grid
+    for i in range(len(pred_results)):
+        pred_list[i] = np.argmax(pred_results[i].get('probabilities'))  # for mnist index == classification
+        pct_list[i] = pred_results[i].get('probabilities')[pred_list[i]] * 100
+        image = image_list[i].reshape(28, 28)
+        grid[i].imshow(image, cmap="gray")
+        grid[i].set_title('Label: {0} \nCertainty: {1}%' \
+                          .format(pred_list[i],
+                                  pct_list[i]))
+        # Only use when plotting original, partial deriv and adversarial images
+        if (adversarial) & (i % 3 == 1):
+            grid[i].set_title("Adversarial \nPartial Derivatives")
+    plt.show()
+
+
+def adversarial_image(mnist_classifier, true_images, fake_labels, lr, n_steps):
+    """
+    :param mnist_classifier: the pre-trained CNN model
+    :param true_images: the image with the specific label
+    :param fake_labels: an Integer indicating the fake label
+    :param lr: learning rate
+    :param n_steps: step to take to generate the adversarial images.
+    """
+    # reshape the input image as (1, 784)
+    true_images = np.reshape(true_images, (1, 784))
+    orig_images = true_images
+
+    # generate one hot encoded fake label.
+    fake_ = np.zeros((10, 1))
+    fake_[fake_labels] = 1
+
+    # calculate the loss between predicted label of the true image and the fake label.
+    # input layer
+    x = tf.placeholder(tf.float32, shape=[None, 784])
+    x_image = tf.reshape(x, [-1, 28, 28, 1])
+    # conv1 layer, loading weights and biases from the pretrained model.
+    conv1_w = mnist_classifier.get_variable_value('conv2d/kernel')
+    conv1_b = mnist_classifier.get_variable_value('conv2d/bias')
+    conv1_o = tf.nn.relu(conv2d(x_image, conv1_w) + conv1_b)
+    pool1_h = max_pool_2x2(conv1_o)
+    # conv2 layer, loading weights and biases from the pretrained model.
+    conv2_w = mnist_classifier.get_variable_value('conv2d_1/kernel')
+    conv2_b = mnist_classifier.get_variable_value('conv2d_1/bias')
+    conv2_o = tf.nn.relu(conv2d(pool1_h, conv2_w) + conv2_b)
+    pool2_h = max_pool_2x2(conv2_o)
+    # fully connected layer 1, loading weights and biases from the pretrained model.
+    dense1_w = mnist_classifier.get_variable_value('dense/kernel')
+    dense1_b = mnist_classifier.get_variable_value('dense/bias')
+    pool2_flat = tf.reshape(pool2_h, [-1, 7 * 7 * 64])
+    dense_o = tf.nn.relu(tf.matmul(pool2_flat, dense1_w) + dense1_b)
+    # fully connected layer 2, loading weights and biases from the pretrained model.
+    dense2_w = mnist_classifier.get_variable_value('dense_1/kernel')
+    dense2_b = mnist_classifier.get_variable_value('dense_1/bias')
+    dense2_o = tf.matmul(dense_o, dense2_w) + dense2_b
+    # softmax the output of fully connected layer 2 to generate logits.
+    logits = tf.nn.softmax(dense2_o)
+    # calculate loss between fake label and predicted label.
+    loss = tf.reduce_mean(
+        tf.nn.softmax_cross_entropy_with_logits_v2(labels=fake_, logits=logits))
+
+    # Take the derivatives of loss w.r.t. input image, and create adversarial image
+    # This is inspired by:
+    # https://codewords.recurse.com/issues/five/why-do-neural-networks-think-a-panda-is-a-vulture
+    deriv = tf.gradients(loss, x)[0]
+    image_adv = tf.stop_gradient(x - tf.sign(deriv) * lr / n_steps)
+    image_adv = tf.clip_by_value(image_adv, 0, 1)
+
+    with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
+        # predicted label and reshape to (10, 1)
+        y = sess.run(logits, feed_dict={x: true_images})
+        y = np.reshape(y, (10, 1))
+        for _ in range(n_steps):
+            # noise
+            dydx = sess.run(deriv, feed_dict={x: true_images})  # 1 x 784
+            # adversarial image
+            x_adv = sess.run(image_adv, feed_dict={x: true_images})  # 1 x 784
+            # Create darray of 3 images - orig, noise/delta, adversarial
+            true_images = np.reshape(x_adv, (1, 784))
+            img_adv_list = orig_images  # (1, 784)
+            img_adv_list = np.append(img_adv_list, dydx, axis=0)
+            img_adv_list = np.append(img_adv_list, true_images, axis=0)
+            # Plot images
+            plot_predictions(mnist_classifier, img_adv_list, adversarial=True)
 
 
 def cnn_model_fn(features, labels, mode):
@@ -104,6 +222,7 @@ def cnn_model_fn(features, labels, mode):
     return tf.estimator.EstimatorSpec(
         mode=mode, loss=loss, eval_metric_ops=eval_metric_ops)
 
+
 def main(unused_argv):
     # Load training and eval data
     mnist = tf.contrib.learn.datasets.load_dataset("mnist")
@@ -122,7 +241,7 @@ def main(unused_argv):
     logging_hook = tf.train.LoggingTensorHook(
         tensors=tensors_to_log, every_n_iter=50)
 
-    # Train the model
+    # Train the model, uncomment the following line for training the model
     # train_input_fn = tf.estimator.inputs.numpy_input_fn(
     #     x={"x": train_data},
     #     y=train_labels,
@@ -135,145 +254,28 @@ def main(unused_argv):
     #     hooks=[logging_hook])
 
     # Evaluate the model and print results
-    # eval_input_fn = tf.estimator.inputs.numpy_input_fn(
-    #     x={"x": eval_data},
-    #     y=eval_labels,
-    #     num_epochs=1,
-    #     shuffle=False)
-    # eval_results = mnist_classifier.evaluate(input_fn=eval_input_fn)
-    # print(eval_results)
+    eval_input_fn = tf.estimator.inputs.numpy_input_fn(
+        x={"x": eval_data},
+        y=eval_labels,
+        num_epochs=1,
+        shuffle=False)
+    eval_results = mnist_classifier.evaluate(input_fn=eval_input_fn,
+                                             checkpoint_path='./tmp/mnist_convnet_model/model.ckpt-20200')
+    print('Evaluation result: ', eval_results)
 
-    index_of_2s = find_all_2s(train_labels) # 1032
+    index_of_2s = find_all_2s(train_labels)
     x_batch = train_data[index_of_2s[10:19]]
-    # for i in eval_labels[index_of_2s]:
-    #     if i == 2:
-    #         continue
-    #     else:
-    #         print(i)
-    # print('complete checking')
-
-    # plot_predictions(mnist_classifier, x_batch)
+    plot_predictions(mnist_classifier, x_batch)
 
     # Pick a random 2 image from first 1000 images
     # Create adversarial image and with target label 6
     rand_index = np.random.randint(0, len(index_of_2s))
     image = train_data[index_of_2s[rand_index]]
-    label_adv = 6  # one hot encoded, adversarial label 6
+    label_adv = 6
+
     # Plot adversarial images
     # Over each step, model certainty changes from 2 to 6
-
-    # create_plot_adversarial_images(mnist_classifier, x_batch[3], labels_adv[3], lr=0.2, n_steps=5)
-    adversial_image(mnist_classifier, image, label_adv, lr=0.25, n_steps=35)
-
-def find_all_2s(labels):
-    index_of_2s = [i for i in range(len(labels)) if labels[i] == 2]
-    return index_of_2s
-
-def conv2d(x, W):
-    return tf.nn.conv2d(x, W, strides = [1, 1, 1, 1], padding= 'SAME')
-
-def max_pool_2x2(x):
-    return tf.nn.max_pool(x, ksize = [1, 2, 2, 1], strides = [1, 2, 2, 1],
-                          padding = 'SAME')
-
-def plot_predictions(mnist_classifier, image_list, output_probs=False, adversarial=False):
-    pred_input_fn = tf.estimator.inputs.numpy_input_fn(
-        x={"x": image_list},
-        num_epochs=1,
-        shuffle=False)
-    pred_results = list(
-        mnist_classifier.predict(input_fn=pred_input_fn, checkpoint_path='./tmp/mnist_convnet_model/model.ckpt-20200'))
-
-
-    pred_list = np.zeros(len(image_list)).astype(int)
-    pct_list = np.zeros(len(image_list)).astype(int)
-
-    # Setup image grid
-    cols = 3
-    rows = int(math.ceil(image_list.shape[0] / cols))
-    fig = plt.figure(1, (12., 12.))
-    grid = ImageGrid(fig, 111,  # similar to subplot(111)
-                     nrows_ncols=(rows, cols),  # creates grid of axes
-                     axes_pad=0.5,  # pad between axes in inch.
-                     )
-
-    # Get probs, images and populate grid
-    for i in range(len(pred_results)):
-        pred_list[i] = np.argmax(pred_results[i].get('probabilities'))  # for mnist index == classification
-        pct_list[i] = pred_results[i].get('probabilities')[pred_list[i]] * 100
-
-        image = image_list[i].reshape(28, 28)
-        grid[i].imshow(image, cmap="gray")
-
-        grid[i].set_title('Label: {0} \nCertainty: {1}%' \
-                          .format(pred_list[i],
-                                  pct_list[i]))
-
-        # Only use when plotting original, partial deriv and adversarial images
-        if (adversarial) & (i % 3 == 1):
-            grid[i].set_title("Adversarial \nPartial Derivatives")
-
-    plt.show()
-
-def adversial_image(mnist_classifier, true_images, fake_labels, lr, n_steps, output_probs=False):
-    true_images = np.reshape(true_images, (1, 784))
-    orig_images = true_images
-    fake_ = np.zeros((10, 1))
-    fake_[fake_labels] = 1
-
-    x = tf.placeholder(tf.float32, shape=[None, 784])
-    x_image = tf.reshape(x, [-1, 28, 28, 1])
-    conv1_w = mnist_classifier.get_variable_value('conv2d/kernel')
-    conv1_b = mnist_classifier.get_variable_value('conv2d/bias')
-    conv1_o = tf.nn.relu(conv2d(x_image, conv1_w) + conv1_b)
-    pool1_h = max_pool_2x2(conv1_o)
-    conv2_w = mnist_classifier.get_variable_value('conv2d_1/kernel')
-    conv2_b = mnist_classifier.get_variable_value('conv2d_1/bias')
-    conv2_o = tf.nn.relu(conv2d(pool1_h, conv2_w) + conv2_b)
-    pool2_h = max_pool_2x2(conv2_o)
-    dense1_w = mnist_classifier.get_variable_value('dense/kernel')
-    dense1_b = mnist_classifier.get_variable_value('dense/bias')
-    pool2_flat = tf.reshape(pool2_h, [-1, 7 * 7 * 64])
-    dense_o = tf.nn.relu(tf.matmul(pool2_flat, dense1_w) + dense1_b)
-    dense2_w = mnist_classifier.get_variable_value('dense_1/kernel')
-    dense2_b = mnist_classifier.get_variable_value('dense_1/bias')
-    dense2_o = tf.matmul(dense_o, dense2_w) + dense2_b
-    logits = tf.nn.softmax(dense2_o)
-    loss = tf.reduce_mean(
-        tf.nn.softmax_cross_entropy_with_logits_v2(labels=fake_, logits=logits))
-    deriv = tf.gradients(loss, x)[0]
-    image_adv = tf.stop_gradient(x - tf.sign(deriv) * lr / n_steps)
-    image_adv = tf.clip_by_value(image_adv, 0, 1)
-
-
-    with tf.Session() as sess:
-        sess.run(tf.global_variables_initializer())
-        y = sess.run(logits, feed_dict={x: true_images})
-        y = np.reshape(y, (10, 1))
-        # print('y: ', y)
-        # print(type(true_images))
-        for _ in range(n_steps):
-            dydx = sess.run(deriv, feed_dict={x: true_images}) # 1 x 784
-            # print('dydx: ')
-            # print(type(dydx))
-            # print(dydx.shape)
-
-            x_adv = sess.run(image_adv, feed_dict={x: true_images}) # 1 x 784
-            # print('x_adv: ')
-            # print(type(x_adv))
-            # print(x_adv.shape)
-
-            # Create darray of 3 images - orig, noise/delta, adversarial
-            true_images = np.reshape(x_adv, (1, 784))
-            # print(type(true_images))
-            img_adv_list = orig_images  # (1, 784)
-            img_adv_list = np.append(img_adv_list, dydx, axis=0)
-            img_adv_list = np.append(img_adv_list, true_images, axis=0)
-
-            # Print/plot images and return probabilities
-            probs = plot_predictions(mnist_classifier, img_adv_list, output_probs=output_probs, adversarial=True)
-            # probs_per_step.append(probs) if output_probs else None
-            # print(probs_per_step)
+    adversarial_image(mnist_classifier, image, label_adv, lr=0.25, n_steps=35)
 
 
 if __name__ == "__main__":
