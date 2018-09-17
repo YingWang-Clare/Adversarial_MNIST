@@ -33,6 +33,7 @@ def plot_predictions(mnist_classifier, image_list, cnt, adversarial=False):
         shuffle=False)
     pred_results = list(
         mnist_classifier.predict(input_fn=pred_input_fn, checkpoint_path='./tmp/mnist_convnet_model/model.ckpt-20200'))
+
     pred_list = np.zeros(len(image_list)).astype(int)
     pct_list = np.zeros(len(image_list)).astype(int)
 
@@ -41,14 +42,14 @@ def plot_predictions(mnist_classifier, image_list, cnt, adversarial=False):
     rows = int(math.ceil(image_list.shape[0] / cols))
     fig = plt.figure(1, (12., 12.))
     fname = 'adv_image_' + str(cnt) + '.png'
-    grid = ImageGrid(fig, 111,  # similar to subplot(111)
-                     nrows_ncols=(rows, cols),  # creates grid of axes
-                     axes_pad=0.5,  # pad between axes in inch.
+    grid = ImageGrid(fig, 111,
+                     nrows_ncols=(rows, cols),
+                     axes_pad=0.5,
                      )
 
     # Get probs, images and populate grid
     for i in range(len(pred_results)):
-        pred_list[i] = np.argmax(pred_results[i].get('probabilities'))  # for mnist index == classification
+        pred_list[i] = np.argmax(pred_results[i].get('probabilities'))
         pct_list[i] = pred_results[i].get('probabilities')[pred_list[i]] * 100
         image = image_list[i].reshape(28, 28)
         grid[i].imshow(image, cmap="gray")
@@ -83,27 +84,33 @@ def adversarial_image(mnist_classifier, true_images, fake_labels, lr, n_steps):
     # input layer
     x = tf.placeholder(tf.float32, shape=[None, 784])
     x_image = tf.reshape(x, [-1, 28, 28, 1])
+
     # conv1 layer, loading weights and biases from the pretrained model.
     conv1_w = mnist_classifier.get_variable_value('conv2d/kernel')
     conv1_b = mnist_classifier.get_variable_value('conv2d/bias')
     conv1_o = tf.nn.relu(conv2d(x_image, conv1_w) + conv1_b)
     pool1_h = max_pool_2x2(conv1_o)
+
     # conv2 layer, loading weights and biases from the pretrained model.
     conv2_w = mnist_classifier.get_variable_value('conv2d_1/kernel')
     conv2_b = mnist_classifier.get_variable_value('conv2d_1/bias')
     conv2_o = tf.nn.relu(conv2d(pool1_h, conv2_w) + conv2_b)
     pool2_h = max_pool_2x2(conv2_o)
+
     # fully connected layer 1, loading weights and biases from the pretrained model.
     dense1_w = mnist_classifier.get_variable_value('dense/kernel')
     dense1_b = mnist_classifier.get_variable_value('dense/bias')
     pool2_flat = tf.reshape(pool2_h, [-1, 7 * 7 * 64])
     dense_o = tf.nn.relu(tf.matmul(pool2_flat, dense1_w) + dense1_b)
+
     # fully connected layer 2, loading weights and biases from the pretrained model.
     dense2_w = mnist_classifier.get_variable_value('dense_1/kernel')
     dense2_b = mnist_classifier.get_variable_value('dense_1/bias')
     dense2_o = tf.matmul(dense_o, dense2_w) + dense2_b
+
     # softmax the output of fully connected layer 2 to generate logits.
     logits = tf.nn.softmax(dense2_o)
+
     # calculate loss between fake label and predicted label.
     loss = tf.reduce_mean(
         tf.nn.softmax_cross_entropy_with_logits_v2(labels=fake_, logits=logits))
@@ -117,19 +124,24 @@ def adversarial_image(mnist_classifier, true_images, fake_labels, lr, n_steps):
 
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
+
         # predicted label and reshape to (10, 1)
         y = sess.run(logits, feed_dict={x: true_images})
         y = np.reshape(y, (10, 1))
+
         for i in range(n_steps):
             # noise
             dydx = sess.run(deriv, feed_dict={x: true_images})  # 1 x 784
+
             # adversarial image
             x_adv = sess.run(image_adv, feed_dict={x: true_images})  # 1 x 784
+
             # Create darray of 3 images - orig, noise/delta, adversarial
             true_images = np.reshape(x_adv, (1, 784))
             img_adv_list = orig_images  # (1, 784)
             img_adv_list = np.append(img_adv_list, dydx, axis=0)
             img_adv_list = np.append(img_adv_list, true_images, axis=0)
+
             # Plot images
             plot_predictions(mnist_classifier, img_adv_list, i, adversarial=True)
 
